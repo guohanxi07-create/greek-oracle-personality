@@ -73,6 +73,11 @@ h1, h2, blockquote { font-family: var(--serif); font-weight: 500; }
 .primary-button { width: 100%; min-height: 58px; padding: 0 23px; border: 0; border-radius: 18px; color: #fffaf2; background: var(--ink); display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: opacity .2s ease, transform .2s ease; }
 .primary-button:hover { transform: translateY(-1px); }
 .primary-button:disabled { opacity: .28; cursor: not-allowed; transform: none; }
+.saved-journey { margin-top: 14px; padding: 13px; border: 1px solid rgba(225,177,113,.32); border-radius: 14px; background: rgba(52,34,61,.46); }
+.saved-journey > p { margin: 0 0 10px; color: rgba(255,239,215,.82); font-family: var(--serif); font-size: 12px; line-height: 1.6; }
+.saved-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.saved-actions button { min-height: 40px; padding: 8px; border: 1px solid rgba(231,190,137,.34); border-radius: 10px; color: #f8e6ca; background: rgba(41,28,52,.72); font: inherit; font-size: 11px; cursor: pointer; }
+.saved-actions button:only-child { grid-column: 1 / -1; }
 .fineprint { margin: 15px 0 0; color: #90877d; font-size: 10px; letter-spacing: .08em; }
 .asset-slot { border: 1px dashed rgba(155,118,80,.3); color: rgba(109, 85, 59, .54); background: rgba(255,255,255,.2); display: grid; place-items: center; font-size: 9px; letter-spacing: .18em; }
 
@@ -400,6 +405,13 @@ body {
         <button class="primary-button" id="startButton" type="button">
           <span>进入神谕</span><span aria-hidden="true">→</span>
         </button>
+        <div class="saved-journey" id="savedJourney" hidden>
+          <p id="savedJourneyText">这台设备留有一段未完成的神谕</p>
+          <div class="saved-actions">
+            <button id="resumeButton" type="button">继续上次答题</button>
+            <button id="savedResultButton" type="button">查看上次结果</button>
+          </div>
+        </div>
         <p class="fineprint">约 5 分钟 · 16 种神格 · 无需登录</p>
       </div>
     </section>
@@ -539,7 +551,7 @@ body {
         </div>
         <div class="result-actions">
           <button class="primary-button" id="restartButton" type="button"><span>重新聆听神谕</span><span aria-hidden="true">↻</span></button>
-          <p class="fineprint">结果只保存在此刻的浏览器中</p>
+          <p class="fineprint">结果已保存在这台设备，重新打开仍可查阅</p>
         </div>
       </div>
     </section>
@@ -747,6 +759,9 @@ body {
 </script>
   <script>(() => {
   const { gods, questions } = window.ORACLE_DATA;
+  const STORAGE_KEY = "greek_oracle_journey_v1";
+  const VISITOR_KEY = "greek_oracle_anonymous_visitor_v1";
+  const METRICS_ORIGIN = location.hostname.endsWith("github.io") ? "https://greek-oracle-access.guohanxi07.workers.dev" : "";
   const state = { index: 0, answers: Array(questions.length).fill(null) };
   let latestResult = null;
   let oracleRequestId = 0;
@@ -758,6 +773,73 @@ body {
   const $ = (id) => document.getElementById(id);
   const views = { cover: $("coverView"), quiz: $("quizView"), result: $("resultView") };
   const whispers = ["第一道命运之门", "别想太久，直觉先知道", "迷雾正在散开", "神祇已听见回声", "命运开始显形"];
+
+  function readJourney() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      const valid = answers => Array.isArray(answers) && answers.length === questions.length && answers.every(value => value === null || (Number.isInteger(value) && value >= 0 && value < 4));
+      return {
+        draft: saved.draft && valid(saved.draft.answers) ? saved.draft : null,
+        completed: saved.completed && valid(saved.completed.answers) && saved.completed.answers.every(Number.isInteger) ? saved.completed : null,
+      };
+    } catch (_) { return { draft:null, completed:null }; }
+  }
+
+  function writeJourney(next) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch (_) { /* Storage is optional in restricted browsers. */ }
+    updateSavedJourney();
+  }
+
+  function saveDraft() {
+    const saved = readJourney();
+    saved.draft = { answers:[...state.answers], index:state.index, updatedAt:Date.now() };
+    writeJourney(saved);
+  }
+
+  function saveCompleted() {
+    const saved = readJourney();
+    saved.draft = null;
+    saved.completed = { answers:[...state.answers], completedAt:Date.now() };
+    writeJourney(saved);
+  }
+
+  function updateSavedJourney() {
+    const panel = $("savedJourney");
+    if (!panel) return;
+    const saved = readJourney();
+    panel.hidden = !saved.draft && !saved.completed;
+    $("resumeButton").hidden = !saved.draft;
+    $("savedResultButton").hidden = !saved.completed;
+    if (saved.draft) {
+      const answered = saved.draft.answers.filter(Number.isInteger).length;
+      $("resumeButton").textContent = `继续上次答题 · ${answered}/${questions.length}`;
+      $("savedJourneyText").textContent = "这台设备留有一段尚未完成的神谕";
+    } else if (saved.completed) {
+      const result = calculateResult(saved.completed.answers);
+      $("savedJourneyText").textContent = `上一次显形：${gods[result.primary].name}`;
+    }
+  }
+
+  function restoreAnswers(answers) {
+    state.answers.splice(0, state.answers.length, ...answers);
+  }
+
+  function anonymousVisitorId() {
+    try {
+      let id = localStorage.getItem(VISITOR_KEY);
+      if (!id) { id = crypto.randomUUID(); localStorage.setItem(VISITOR_KEY, id); }
+      return id;
+    } catch (_) { return "anonymous-" + Math.random().toString(36).slice(2) + Date.now(); }
+  }
+
+  function reportMetric(type) {
+    fetch(`${METRICS_ORIGIN}/api/metrics/${type}`, {
+      method:"POST",
+      headers:{ "content-type":"application/json" },
+      body:JSON.stringify({ visitorId:anonymousVisitorId() }),
+      keepalive:true,
+    }).catch(() => {});
+  }
 
   function showView(name) {
     document.body.dataset.view = name;
@@ -818,6 +900,7 @@ body {
         state.answers[state.index] = i;
         tone("tap");
         haptic(10);
+        saveDraft();
         renderQuestion();
         advanceTimer = window.setTimeout(advanceQuestion, 560);
       });
@@ -868,6 +951,7 @@ body {
     oracleRequestId += 1;
     const result = calculateResult(state.answers);
     latestResult = result;
+    saveCompleted();
     const primary = gods[result.primary];
     const secondary = gods[result.secondary];
     $("flipCard").classList.remove("is-flipped");
@@ -1213,18 +1297,46 @@ body {
     if (state.answers[state.index] === null) return;
     if (state.index < questions.length - 1) {
       state.index += 1;
+      saveDraft();
       renderQuestion();
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
+      reportMetric("complete");
       renderResult();
     }
   }
 
-  $("startButton").addEventListener("click", () => { showView("quiz"); renderQuestion(); });
-  $("backButton").addEventListener("click", () => { window.clearTimeout(advanceTimer); if (state.index > 0) { state.index -= 1; renderQuestion(); } });
+  $("startButton").addEventListener("click", () => {
+    state.index = 0;
+    state.answers.fill(null);
+    const saved = readJourney();
+    saved.draft = null;
+    writeJourney(saved);
+    reportMetric("start");
+    showView("quiz");
+    renderQuestion();
+  });
+  $("resumeButton").addEventListener("click", () => {
+    const draft = readJourney().draft;
+    if (!draft) return;
+    restoreAnswers(draft.answers);
+    reportMetric("start");
+    state.index = Math.max(0, Math.min(questions.length - 1, Number(draft.index) || 0));
+    showView("quiz");
+    renderQuestion();
+  });
+  $("savedResultButton").addEventListener("click", () => {
+    const completed = readJourney().completed;
+    if (!completed) return;
+    restoreAnswers(completed.answers);
+    state.index = questions.length - 1;
+    renderResult();
+    window.setTimeout(revealCard, 120);
+  });
+  $("backButton").addEventListener("click", () => { window.clearTimeout(advanceTimer); if (state.index > 0) { state.index -= 1; saveDraft(); renderQuestion(); } });
   $("nextButton").addEventListener("click", advanceQuestion);
   $("restartButton").addEventListener("click", () => {
-    window.clearTimeout(advanceTimer); state.index = 0; state.answers.fill(null); latestResult = null; oracleRequestId += 1; showView("cover"); $("topbarNote").textContent = "命运尚未显形";
+    window.clearTimeout(advanceTimer); state.index = 0; state.answers.fill(null); latestResult = null; oracleRequestId += 1; const saved = readJourney(); saved.draft = null; writeJourney(saved); showView("cover"); $("topbarNote").textContent = "命运尚未显形";
   });
   $("oracleQuestion").addEventListener("input", (event) => {
     const value = event.target.value;
@@ -1247,6 +1359,8 @@ body {
   document.querySelector(".brand").addEventListener("click", (event) => { event.preventDefault(); window.clearTimeout(advanceTimer); showView("cover"); });
   window.__oracleQuiz = { calculateResult, gods, questions };
   document.body.dataset.view = "cover";
+  updateSavedJourney();
+  reportMetric("view");
 })();
 </script>
 </body>
