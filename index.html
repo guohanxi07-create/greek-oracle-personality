@@ -1026,7 +1026,8 @@ body {
 
   function analyzeQuestion(question) {
     const theme = detectTheme(question);
-    const focus = question.replace(/[？?。！!]/g, "").trim().slice(0, 42);
+    const clean = question.replace(/\s+/g, " ").trim();
+    const focus = clean.replace(/[？?。！!]+$/g, "").slice(0, 72);
     const emotions = [
       { words:["痛苦","难受","撑不住","崩溃"], label:"耗损" },
       { words:["害怕","担心","焦虑","不安"], label:"恐惧" },
@@ -1035,12 +1036,27 @@ body {
       { words:["迷茫","纠结","犹豫","不知道"], label:"摇摆" }
     ];
     const emotion = emotions.find(item => item.words.some(word => question.includes(word)))?.label || "不确定";
-    let dilemma = { label:"寻找方向", action:"先写下你希望现实发生的具体变化，以及什么证据会证明它正在发生。" };
-    if (/结束|分手|离开|放弃|辞职/.test(question) && /等|继续|留下|坚持|还是/.test(question)) dilemma = { label:"离开与继续", action:"分别写下“继续”的最低条件和“离开”的触发条件，并为观察设定期限。" };
-    else if (/能不能|会不会|结果|成功|上岸|通过/.test(question)) dilemma = { label:"结果与控制", action:"把结果拆成可控投入、外部变量和验证节点；只对第一项作出承诺。" };
-    else if (/要不要|是否|应该|选择|还是/.test(question)) dilemma = { label:"选择与代价", action:"不要只问哪个选项更好，比较两种代价中哪一种更值得你承担。" };
-    else if (/说|表达|坦白|告诉|沟通/.test(question)) dilemma = { label:"表达与暴露", action:"先写出你最怕对方听见的那句话，再决定用多大的诚实说出来。" };
-    return { theme, focus, emotion, dilemma };
+    const intentRules = [
+      { key:"reconcile", re:/复合|挽回|重新在一起|回头/, label:"复合与旧关系", direct:"重点不是还能不能回到从前，而是导致分开的那件事有没有发生可验证的改变。", action:"只验证一个问题：当初让关系破裂的行为，现在是否已被持续行动替代；没有新证据，就不要把想念当成转机。" },
+      { key:"leave", re:/分手|离婚|辞职|离开|放弃|结束|断联/, label:"离开与继续", direct:"你正在问要不要结束。先判断眼前是一次可以修复的困难，还是已经重复发生、持续消耗你的模式。", action:"写下继续的三个最低条件和一个截止日期；到期仍没有实际变化，就执行离开的准备，而不是再次延长期限。" },
+      { key:"confess", re:/表白|坦白|告白|说出|告诉.{0,6}(他|她|对方)|沟通/, label:"表达与回应", direct:"你问的不是该不该说，而是说了以后能否承受对方真实的回应。", action:"用一句不施压的话说清你的感受和期待，同时给对方回答的空间；把明确回应当答案，不替沉默编故事。" },
+      { key:"feelings", re:/(他|她|对方).{0,8}(喜欢|爱|在意|想|态度)|喜欢我|爱我|对我.*感觉/, label:"对方的心意", direct:"别替对方的内心下结论。一个人是否在意你，最可靠的线索是主动、稳定和愿意承担，而不是偶尔的热烈。", action:"回看最近四周：对方是否主动靠近、兑现承诺、在你需要时出现；三项长期缺席，就按现实而不是猜测作判断。" },
+      { key:"timing", re:/什么时候|多久|哪天|何时|今年|近期|最近会/, label:"时机与等待", direct:"你在问时间，但真正需要的是一个不再无限等待的节点。", action:"不要猜某一天；为这件事设一个现实观察期，并规定期间必须出现的进展。期限到了，只按进展决定下一步。" },
+      { key:"choice", re:/还是|二选一|哪个|选.{0,8}好|A还是B|留在.{0,8}去/, label:"两条路的代价", direct:"这不是在找绝对正确的一条路，而是在判断哪一种代价更值得承担。", action:"分别写下两个选择三个月后的日常、损失和可撤回性；优先选择能带来新信息、即使失败也可修复的一边。" },
+      { key:"prediction", re:/会不会|能不能|可以成功|能成功|会成功|有结果|上岸|通过|录取|拿到/, label:"结果与概率", direct:"你问的是结果，但现在能判断的只有概率：准备是否充分、关键条件是否满足、还有没有补救时间。", action:"列出决定结果的三个条件，今天核实最薄弱的一项；若能补就立刻补，不能补就同时准备备选方案。" },
+      { key:"permission", re:/要不要|该不该|应不应该|是否应该|值得吗|合适吗/, label:"行动与代价", direct:"你并非完全不知道该不该做，而是在寻找一个不必承担后果的许可。", action:"先问最坏后果是否能承受、决定是否可撤回；若两项都可控，就做一个小规模版本，不用一次押上全部。" },
+      { key:"cause", re:/为什么|怎么会|原因|为何/, label:"原因与证据", direct:"你在寻找原因，但眼下最危险的是用一个顺耳的解释填补信息空白。", action:"列出三种可能解释，并为每一种写一条支持证据和一条反证；优先去确认最容易被事实推翻的那一个。" },
+      { key:"method", re:/怎么办|怎么做|如何|怎样/, label:"方法与下一步", direct:"你需要的不是更多预言，而是一个能让局面产生新反馈的动作。", action:"把目标缩小成七天内能完成、能观察结果的一步；做完后根据现实反馈调整，而不是继续在脑中排演。" }
+    ];
+    const intent = intentRules.find(rule => rule.re.test(clean)) || { key:"open", label:"真正的焦点", direct:`你问的是“${focus}”。先分清你想得到的是事实、许可，还是安慰；三者需要的答案并不相同。`, action:"写下你最希望发生的结果，以及一个会让你改变判断的现实证据；先去取得那条证据。" };
+    const risk = /骗|背叛|出轨|暴力|威胁|控制|欠钱|赌博|自杀|伤害/.test(clean) ? "high" : /一直|每次|反复|又|长期|多年/.test(clean) ? "repeating" : "normal";
+    const timeCue = clean.match(/(今天|明天|这周|本周|这个月|下个月|今年|近期|最近|\d+天|\d+个月)/)?.[0] || "接下来一段时间";
+    const subject = clean.match(/(男朋友|女朋友|前任|老公|老婆|丈夫|妻子|老板|同事|朋友|父母|妈妈|爸爸|孩子|老师|对方|他|她)/)?.[0] || "这件事里的另一方";
+    const dilemma = { label:intent.label, action:intent.action };
+    const direct = risk === "high"
+      ? `先不谈预兆：你描述的内容可能涉及安全、欺骗或严重越界。保护自己、保留证据并向可信的人或专业机构求助，优先级高于维持表面平静。`
+      : intent.direct;
+    return { theme, focus, raw:clean, emotion, dilemma, intent:intent.key, direct, risk, timeCue, subject };
   }
 
   const themeNeeds = { relationship:"被选择、被尊重与真实联结", work:"成长、证明与更大的未来", money:"安全、自由与对资源的掌控", family:"爱、责任与不被吞没的边界", health:"恢复、确定感与身体安全", choice:"自由与愿意承担的代价", self:"方向与新的自我认同", general:"确定感与一个可以行动的方向" };
@@ -1137,25 +1153,108 @@ body {
   };
 
   const plainOracleAnswers = {
-    zeus:a => `别再等别人替你定。先弄清这件事是不是你能决定的；能，就定时间去做，不能，就把边界说清楚。`,
-    hera:a => ["relationship","family"].includes(a.theme.key)
-      ? `重点不是你还能忍多久，而是对方有没有一起解决“${a.focus}”。只靠你一个人维持，就不算共同的承诺。`
-      : `别只问“${a.focus}”该不该做。先看它是否符合你真正重视的规则、责任和长期安排；如果只是为了不让别人失望，就再想一次。`,
-    poseidon:a => `你现在情绪很满，先别在最上头的时候做最终决定。等两天，再看那个念头还在不在。`,
-    demeter:a => `先看这件事有没有实际回报。一直付出却没有回应，就该暂停，不要只怪自己不够努力。`,
-    athena:a => `把事实、猜测和愿望分开写。你下一步缺的不是勇气，是一条能验证的新信息。`,
-    apollo:a => `你可能已经看到答案，只是不喜欢它。把最不想承认的事实写出来，再决定。`,
-    artemis:a => `如果这个选择总要你委屈自己、放弃边界，它就不适合你。先保住自己的生活。`,
-    ares:a => `别只在脑子里打转。今天做一个能改变局面的动作，但不要把发脾气当成行动。`,
-    aphrodite:a => `你想要的可能不只是结果，而是被重视。看对方有没有实际回应，不要只看自己有多喜欢。`,
-    hermes:a => `现在不一定非得二选一。先问清关键信息，或者试一个可以反悔的小版本。`,
-    hephaestus:a => `别先问会不会成功。先看手上有什么，然后做一个小测试；做出来比想明白更有用。`,
-    dionysus:a => `先承认你真正想要什么，别装作无所谓。睡一晚，第二天还想要，再行动。`,
-    hades:a => `有一部分可能已经回不来了。停止和过去讨价还价，把还能带走的经验和选择权留下。`,
-    persephone:a => `你已经不是以前的你了。不要问怎么回到从前，问现在的你准备怎么重新开始。`,
-    hestia:a => `先休息、吃饭、睡一觉，把生活稳住。状态平静后仍然想做的事，才更值得相信。`,
-    eros:a => `喜欢和命中注定不是一回事。看现实有没有回应，也看这份渴望有没有让你失去自己。`
+    zeus:a => `关于“${a.focus}”，我的直答是：${a.direct} 你能决定的部分，今天定下；需要${a.subject}回应的部分，给出期限，不无限等候。`,
+    hera:a => `我听见的不是一句泛泛的询问，而是你在问“${a.focus}”是否值得继续守。${a.direct} 若承诺只由你一人履行，它就已经失去对等。`,
+    poseidon:a => `这件事的浪头很高，但我不拿一时情绪骗你。${a.direct} 等最强烈的感觉退去后，再看你对“${a.focus}”的判断有没有改变。`,
+    demeter:a => `就“${a.focus}”而言，先看现实有没有生长。${a.direct} 若你持续投入却长期没有回应，暂停不是薄情，是停止透支。`,
+    athena:a => `战略判断：${a.direct} 对“${a.focus}”，把已发生的事实、你对${a.subject}的猜测、你希望发生的结果分开；下一步只依据事实。`,
+    apollo:a => `我把光照在“${a.focus}”上：${a.direct} 现在请说出那个你最不愿承认、却已有证据支持的事实，它比漂亮的预兆更接近答案。`,
+    artemis:a => `我的箭先划出边界：${a.direct} 无论“${a.focus}”最后如何，都不要用尊严、身体安全或长期自由去交换一个不确定回应。`,
+    ares:a => `直说：${a.direct} 对“${a.focus}”，别再只想；在${a.timeCue}内做一个能得到真实反馈的动作。若涉及危险，先撤离而不是硬碰。`,
+    aphrodite:a => `你在“${a.focus}”里渴望的，不只是答案，还有被珍惜的感觉。${a.direct} 请看${a.subject}是否用持续行动回应，而不只看你有多心动。`,
+    hermes:a => `这道题未必只有你以为的两个答案。${a.direct} 把“${a.focus}”改写成一个可以向当事人核实的问题，再找一条可撤回的试走路线。`,
+    hephaestus:a => `我不替“${a.focus}”盖成功印章。${a.direct} 把现有时间、钱、能力和证据摆上桌，做一个最小测试；能做出来的部分，才是真材料。`,
+    dionysus:a => `先卸下面具：你对“${a.focus}”真正想要什么？${a.direct} 今晚允许自己说真话，明早再看它是否仍成立；仍成立，才行动。`,
+    hades:a => `我不会用希望粉饰“${a.focus}”。${a.direct} 分清已经结束、仍可挽回、必须告别的三部分；不要再向关闭的门支付代价。`,
+    persephone:a => `“${a.focus}”正在要求你换一种活法。${a.direct} 不必回到从前；请用一个现实动作证明现在的你会如何选择。`,
+    hestia:a => `先把火守稳再谈“${a.focus}”。${a.direct} 若你正疲惫或恐惧，先恢复睡眠与基本秩序；平静后仍不变的念头，更值得信。`,
+    eros:a => `箭指向“${a.focus}”里的渴望，但不替${a.subject}作答。${a.direct} 看现实有没有双向靠近；没有回应的强烈，也只是强烈，不是命定。`
   };
+
+  function weaveQuestionIntoOracle(deity, response, analysis) {
+    const scenarioBlocks = {
+      reconcile:()=>[
+        {label:"先回答你：要不要回头", text:analysis.direct},
+        {label:"旧问题有没有真的改变", text:`不要只看${analysis.subject}这次说了什么。核对当初导致分开的行为，是否已持续改变至少一段时间，而不是联系你之后才短暂表现。`},
+        {label:"若要试，只能这样试", text:"不立刻恢复原来的关系；先以低投入、可退出的方式观察，并提前说清再次撒谎、失联或越界会发生什么。"},
+        {label:"你不能拿来当证据的东西", text:"想念、孤独、对方突然热情，以及你们过去很美好，都不能证明未来会不同。"}
+      ],
+      leave:()=>[
+        {label:"这次不是问你能忍多久", text:analysis.direct},
+        {label:"判断是困难还是模式", text:`回看最近三次同类事件：${analysis.subject}是否承认问题、参与修复，并维持改变；若每次都由你收拾，答案已很清楚。`},
+        {label:"给继续设置门槛", text:analysis.dilemma.action},
+        {label:"离开前先保护现实", text:"提前处理住所、金钱、工作交接、证据与支持者；如果涉及威胁或暴力，不当面对质，先确保安全。"}
+      ],
+      confess:()=>[
+        {label:"该不该说", text:analysis.direct},
+        {label:"把这句话说短", text:`你可以对${analysis.subject}说：“我想把真实感受告诉你，我希望的是____；你不必马上回答，但请给我明确回应。”`},
+        {label:"什么才算回答", text:"明确接受、明确拒绝、请求合理时间，都算回答；长期含糊、只享受你的靠近却不表态，也是一种回答。"}
+      ],
+      feelings:()=>[
+        {label:"祂不能替别人读心", text:analysis.direct},
+        {label:"只看这三种证据", text:`${analysis.subject}是否主动联系你、是否兑现说过的话、是否愿意为靠近你付出时间与选择成本。`},
+        {label:"别被单次热烈欺骗", text:"一句暧昧的话、一次深夜联系或偶尔吃醋，都不能单独证明爱；请看稳定模式。"}
+      ],
+      timing:()=>[
+        {label:"神谕不给虚假的日期", text:analysis.direct},
+        {label:`把“${analysis.timeCue}”变成观察窗`, text:"写下期限内必须出现的一项实际进展：一次确认、一个结果、一份合同或一个明确行动。"},
+        {label:"到期后的规则", text:"有进展就继续评估；没有进展就改变策略或停止等待，不再用新的日期安慰自己。"}
+      ],
+      choice:()=>[
+        {label:"不是哪一个听起来更好", text:analysis.direct},
+        {label:"把两种生活摊开", text:"分别比较三个月后的钱、时间、成长、关系支持和每天醒来时的状态；不要只比较一个最耀眼的优点。"},
+        {label:"先选可验证的一步", text:"向关键人物补问信息、争取试用或缓冲期，并确认退出成本。信息不足时，暂缓承诺也是选择。"},
+        {label:"真正的倾向", text:`若两边条件接近，优先选择更接近你想成为的人、且失败后仍可修复的那一边。`}
+      ],
+      prediction:()=>[
+        {label:"关于会不会成功", text:analysis.direct},
+        {label:"现在就检查胜率", text:"把准备度、外部名额或规则、剩余补救时间分别打分；最低的一项才是当下真正的问题。"},
+        {label:"别只准备一个结局", text:"继续争取主目标，同时安排一个不依赖运气的备选方案；备选不是唱衰，是把主动权留在手里。"}
+      ],
+      permission:()=>[
+        {label:"你在等谁批准", text:analysis.direct},
+        {label:"先过两道门", text:"最坏结果你能承受吗？决定可以撤回吗？若一项是否定，就先补保护措施，不要凭冲动全押。"},
+        {label:"允许一个小版本", text:"先用更少的钱、更短的时间或更低的承诺试一次，让现实给你答案。"}
+      ],
+      cause:()=>[
+        {label:"先别急着相信一个解释", text:analysis.direct},
+        {label:"三种可能", text:"写下最善意、最普通、最糟糕的三种原因；每种都配一条现实证据，不让情绪独占解释权。"},
+        {label:"去问能被验证的问题", text:`不要问${analysis.subject}“你到底怎么想”，改问发生了什么、下一步会做什么、什么时候能看到结果。`}
+      ],
+      method:()=>[
+        {label:"先做什么", text:analysis.direct},
+        {label:"把问题缩到七天", text:analysis.dilemma.action},
+        {label:"七天后只看反馈", text:"记录局面是否更清楚、成本是否可承受、你是否更有力量；若三项都没有改善，就换方法，不要只加倍用力。"}
+      ],
+      open:()=>[
+        {label:"我先回应你问的这件事", text:analysis.direct},
+        {label:"你真正要确认什么", text:`把“${analysis.focus}”改成一个可由事实回答的问题，例如是否发生、是否持续、是否愿意承担。`},
+        {label:"下一步", text:analysis.dilemma.action}
+      ]
+    };
+    const deityLens = {
+      zeus:{label:"宙斯要你承担的",text:"作出决定的人也要承担后果；别把命令别人服从误当成解决问题。"},
+      hera:{label:"赫拉守护的底线",text:"任何选择都应尊重承诺与对等；不要为了维持体面，独自承担本应共同承担的代价。"},
+      poseidon:{label:"波塞冬提醒",text:"强烈感受是真实信号，却不是全部事实；等情绪退一层，再决定航向。"},
+      demeter:{label:"德墨忒尔看收成",text:"值得继续的事会有微小但持续的生长；只有消耗、没有回馈的土地需要休耕。"},
+      athena:{label:"雅典娜的判断规则",text:"把事实、推测、愿望分栏；在取得一条新证据之前，不增加投入。"},
+      apollo:{label:"阿波罗照亮的盲点",text:"别让漂亮说法遮住难看的事实；最不愿承认的那一条，往往最需要被看见。"},
+      artemis:{label:"阿耳忒弥斯的边界",text:"答案不能以失去自由、尊严或身体安全为代价；能离开，选择才真正属于你。"},
+      ares:{label:"阿瑞斯的行动令",text:`在${analysis.timeCue}内完成一个会改变局面的动作；行动是取证、表达或撤离，不是发泄。`},
+      aphrodite:{label:"阿佛洛狄忒问你",text:"你是在真心选择它，还是只想证明自己值得被选择？两者会把你带去不同方向。"},
+      hermes:{label:"赫尔墨斯指出的暗门",text:"不要急着接受伪装成二选一的局面；补问一个关键信息，常会出现第三条路。"},
+      hephaestus:{label:"赫淮斯托斯只认材料",text:"把想法变成一次小测试。不能被验证的保证，先不要当作可用的材料。"},
+      dionysus:{label:"狄俄尼索斯撕下的面具",text:"承认你真正想要什么，然后让第二天清晨检验它；释放之后仍成立的欲望才值得行动。"},
+      hades:{label:"哈迪斯划下界线",text:"承认已经结束的部分，停止和过去讨价还价；把资源留给仍能改变的事。"},
+      persephone:{label:"珀耳塞福涅带回地面的",text:"不要问怎样回到从前；问经历这件事后的你，愿意用什么新身份继续生活。"},
+      hestia:{label:"赫斯提亚先守住炉火",text:"重大判断不要建立在失眠、饥饿和长期过载上；先让生活恢复最低限度的稳定。"},
+      eros:{label:"厄洛斯校准箭头",text:"渴望能指出方向，却不能证明对方或结果会回应；强烈不等于命定。"}
+    };
+    response.blocks = (scenarioBlocks[analysis.intent] || scenarioBlocks.open)();
+    const insertAt = Math.min(response.blocks.length, deity === "ares" || deity === "athena" ? 1 : 2);
+    response.blocks.splice(insertAt, 0, deityLens[deity]);
+    return response;
+  }
 
   const answerBookPages = [
     "先不要急着给出答案。", "你已经知道，只是不愿承认。", "可以试试，但先留好退路。", "再等一个更清楚的信号。",
@@ -1244,7 +1343,7 @@ body {
     $("oracleRitual").scrollIntoView({ behavior:"smooth", block:"nearest" });
     window.setTimeout(() => {
       if (requestId !== oracleRequestId || !latestResult) return;
-      const response = deityOracleFormats[latestResult.primary](analysis, primary, secondary);
+      const response = weaveQuestionIntoOracle(latestResult.primary, deityOracleFormats[latestResult.primary](analysis, primary, secondary), analysis);
       $("oracleAnswer").className = `oracle-answer oracle-style-${response.style}`;
       $("oracleAnswerLabel").textContent = response.label;
       $("oracleAnswerVoice").textContent = response.voice;
